@@ -4,10 +4,12 @@ from yolov5.utils.general import (
 from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
 from deep_sort.utils.parser import get_config
 from deep_sort.deep_sort import DeepSort
+from sklearn.cluster import DBSCAN
 import argparse
 import os
 import platform
 import shutil
+import matplotlib as plt
 import time
 from pathlib import Path
 import cv2
@@ -15,11 +17,29 @@ import torch
 import torch.backends.cudnn as cudnn
 # https://github.com/pytorch/pytorch/issues/3678
 import sys
-sys.path.insert(0, './yolov5')
+import numpy as np
+from aux_functions import *
 
+sys.path.insert(0, './yolov5')
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
+mouse_pts = []
 
+image = np.zeros(shape=[512, 512, 3], dtype=np.uint8)
+
+def get_mouse_points(event, x, y, flags, param):
+    # Used to mark 4 points on the frame zero of the video that will be warped
+    # Used to mark 2 points on the frame zero of the video that are 6 feet away
+    global mouseX, mouseY, mouse_pts
+    if event == cv2.EVENT_LBUTTONDOWN:
+        mouseX, mouseY = x, y
+        cv2.circle(image, (x, y), 10, (0, 255, 255), 10)
+        if "mouse_pts" not in globals():
+            mouse_pts = []
+        mouse_pts.append((x, y))
+        print("Point detected")
+        print(mouse_pts)
 
 def bbox_rel(image_width, image_height,  *xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
@@ -42,16 +62,20 @@ def compute_color_for_labels(label):
     return tuple(color)
 
 
-def draw_boxes(img, bbox, identities=None, offset=(0,0)):
+def draw_boxes(img, bbox,identities=None, cluster_labels=None, offset=(0,0)):
+    j = len(cluster_labels)
     for i, box in enumerate(bbox):
+        if i == j:
+            break
         x1, y1, x2, y2 = [int(i) for i in box]
         x1 += offset[0]
         x2 += offset[0]
         y1 += offset[1]
         y2 += offset[1]
         # box text and bar
-        id = int(identities[i]) if identities is not None else 0   
-        color = compute_color_for_labels(id)
+        id = int(identities[i]) if identities is not None else 0
+        cluster_id = int(cluster_labels[i]) if cluster_labels is not None else 0
+        color = compute_color_for_labels(cluster_id)
         label = '{}{:d}'.format("", id)
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
@@ -64,6 +88,10 @@ def detect(opt, save_img=False):
     out, source, weights, view_img, save_txt, imgsz = \
         opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
     webcam = source == '0' or source.startswith('rtsp') or source.startswith('http') or source.endswith('.txt')
+
+    # initialize the ROI frame
+    cv2.namedWindow("image")
+    cv2.setMouseCallback("image", get_mouse_points)
 
     # initialize deepsort
     cfg = get_config()
@@ -116,6 +144,40 @@ def detect(opt, save_img=False):
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
 
+        # Get the ROI if this is the first frame
+        if frame_idx == 0:
+            while True:
+                image = im0s
+                cv2.imshow("image", image)
+                cv2.waitKey(1)
+                if len(mouse_pts) == 7:
+                    cv2.destroyWindow("image")
+                    break
+                first_frame_display = False
+        four_points = mouse_pts
+
+        # Get perspective, M is the transformation matrix for bird's eye view
+        M, Minv = get_camera_perspective(image, four_points[0:4])
+
+        # Last two points in getMousePoints... this will be the threshold distance between points
+        threshold_pts = src = np.float32(np.array([four_points[4:]]))
+
+        # Convert distance to bird's eye view
+        warped_threshold_pts = cv2.perspectiveTransform(threshold_pts, M)[0]
+
+        print(warped_threshold_pts)
+        # Get distance in pixels
+        threshold_pixel_dist = np.sqrt(
+            (warped_threshold_pts[0][0] - warped_threshold_pts[1][0]) ** 2
+            + (warped_threshold_pts[0][1] - warped_threshold_pts[1][1]) ** 2
+        )
+
+        # Draw the ROI on the output images
+        ROI_pts = np.array(
+            [four_points[0], four_points[1], four_points[3], four_points[2]], np.int32
+        )
+        cv2.polylines(im0s, [ROI_pts], True, (0, 255, 255), thickness=4)
+
         # Inference
         t1 = time_synchronized()
         pred = model(img, augment=opt.augment)[0]
@@ -144,6 +206,7 @@ def detect(opt, save_img=False):
                     s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
                 bbox_xywh = []
+                person_center_coords = []
                 confs = []
 
                 # Adapt detections to deep sort input format
@@ -153,6 +216,24 @@ def detect(opt, save_img=False):
                     obj = [x_c, y_c, bbox_w, bbox_h]
                     bbox_xywh.append(obj)
                     confs.append([conf.item()])
+                    single_person_center_coords = [x_c, y_c]
+                    person_center_coords.append(single_person_center_coords)
+
+                #convert all center coordinates to birds view
+                warped_pts, bird_image = plot_points_on_bird_eye_view(
+                    im0, person_center_coords, M, 1, 1
+                )
+
+                #print("warped points: ")
+                #print(warped_pts)
+
+                # remove negative points from warped points
+                warped_pts_in_range = list(filter(lambda x : x[0] > 0 and x[1] > 0, warped_pts))
+
+                # time for the dbscan to get the cluster groups
+                clusters = DBSCAN(threshold_pixel_dist*1.2, min_samples=1).fit(warped_pts)
+                print("Labels length: ", len(clusters.labels_))
+                print("bbox_xywh length: ", len(bbox_xywh))
 
                 xywhs = torch.Tensor(bbox_xywh)
                 confss = torch.Tensor(confs)
@@ -160,11 +241,12 @@ def detect(opt, save_img=False):
                 # Pass detections to deepsort
                 outputs = deepsort.update(xywhs, confss, im0)
 
+                #print("Output len: ", outputs[:, -1])
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
                     identities = outputs[:, -1]
-                    draw_boxes(im0, bbox_xyxy, identities)
+                    draw_boxes(im0, bbox_xyxy, identities, clusters.labels_)
 
                 # Write MOT compliant results to file
                 if save_txt and len(outputs) != 0:  
