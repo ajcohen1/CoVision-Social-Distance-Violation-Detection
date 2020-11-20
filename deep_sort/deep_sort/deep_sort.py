@@ -1,6 +1,7 @@
 import numpy as np
 import torch
-
+from shapely.geometry import Point
+from shapely.geometry.polygon import Polygon
 from .deep.feature_extractor import Extractor
 from .sort.nn_matching import NearestNeighborDistanceMetric
 from .sort.preprocessing import non_max_suppression
@@ -23,8 +24,11 @@ class DeepSort(object):
         metric = NearestNeighborDistanceMetric("cosine", max_cosine_distance, nn_budget)
         self.tracker = Tracker(metric, max_iou_distance=max_iou_distance, max_age=max_age, n_init=n_init)
 
-    def update(self, bbox_xywh, confidences, ori_img):
+    def update(self, bbox_xywh, confidences, ori_img, ROI_pts):
         self.height, self.width = ori_img.shape[:2]
+
+        ROI_polygon = Polygon(ROI_pts)
+
         # generate detections
         features = self._get_features(bbox_xywh, ori_img)
         bbox_tlwh = self._xywh_to_tlwh(bbox_xywh)
@@ -47,6 +51,12 @@ class DeepSort(object):
                 continue
             box = track.to_tlwh()
             x1,y1,x2,y2 = self._tlwh_to_xyxy(box)
+
+            #confirm is in rectangle before adding to tracker
+            center_coord_point = Point(( (x1 + x2) / 2, (y1 + y2) / 2 ))
+            if not ROI_polygon.contains(center_coord_point):
+                continue
+
             track_id = track.track_id
             outputs.append(np.array([x1,y1,x2,y2,track_id], dtype=np.int))
         if len(outputs) > 0:

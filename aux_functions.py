@@ -40,7 +40,6 @@ def plot_lines_between_nodes(warped_points, bird_image, d_thresh):
         if dd[0][i] != dd[1][i]:
             point1 = dd[0][i]
             point2 = dd[1][i]
-
             danger_p.append([point1, point2])
             cv2.line(
                 bird_image,
@@ -50,10 +49,10 @@ def plot_lines_between_nodes(warped_points, bird_image, d_thresh):
                 lineThickness,
             )
     # Display Birdeye view
-    cv2.imshow("Bird Eye View", bird_image)
-    cv2.waitKey(1)
+    #cv2.imshow("Bird Eye View", bird_image)
+    #cv2.waitKey(1)
 
-    return six_feet_violations, ten_feet_violations, total_pairs
+    return six_feet_violations, ten_feet_violations, total_pairs, bird_image
 
 
 def plot_points_on_bird_eye_view(frame, all_center_coords, M, scale_w, scale_h):
@@ -65,10 +64,7 @@ def plot_points_on_bird_eye_view(frame, all_center_coords, M, scale_w, scale_h):
     solid_back_color = (41, 41, 41)
 
     #allocate a blank image for modification
-    blank_image = np.zeros(
-        (int(frame_h * scale_h), int(frame_w * scale_w), 3), np.uint8
-    )
-    blank_image[:] = solid_back_color
+    blank_image = cv2.warpPerspective(frame, M, (frame_w, frame_h))
 
     #allocate the array for the warped birds eye view person coordinates
     warped_pts = []

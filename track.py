@@ -4,7 +4,9 @@ from yolov5.utils.general import (
 from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
 from deep_sort.utils.parser import get_config
 from deep_sort.deep_sort import DeepSort
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import DBSCAN, AgglomerativeClustering
+from shapely.geometry import Point
+from shapely.geometry.polygon import Polygon
 import argparse
 import os
 import platform
@@ -21,12 +23,16 @@ import numpy as np
 from aux_functions import *
 
 sys.path.insert(0, './yolov5')
-os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 mouse_pts = []
 
+SHRINK_X = 0.1
+SHRINK_Y = 0.1
+
 image = np.zeros(shape=[512, 512, 3], dtype=np.uint8)
+
 
 def get_mouse_points(event, x, y, flags, param):
     # Used to mark 4 points on the frame zero of the video that will be warped
@@ -38,10 +44,25 @@ def get_mouse_points(event, x, y, flags, param):
         if "mouse_pts" not in globals():
             mouse_pts = []
         mouse_pts.append((x, y))
-        print("Point detected")
-        print(mouse_pts)
 
-def bbox_rel(image_width, image_height,  *xyxy):
+
+def shrink_ROI_pts(coords, x_shrink, y_shrink):
+    xs = [i[0] for i in coords]
+    ys = [i[1] for i in coords]
+
+    # simplistic way of calculating a center of the graph, you can choose your own system
+    x_center = 0.5 * min(xs) + 0.5 * max(xs)
+    y_center = 0.5 * min(ys) + 0.5 * max(ys)
+
+    # shrink figure
+    new_xs = [(i - x_center) * (1 - x_shrink) + x_center for i in xs]
+    new_ys = [(i - y_center) * (1 - y_shrink) + y_center for i in ys]
+
+    # create list of new coordinates
+    new_coords = zip(new_xs, new_ys)
+    return list(new_coords)
+
+def bbox_rel(image_width, image_height, *xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
     bbox_left = min([xyxy[0].item(), xyxy[2].item()])
     bbox_top = min([xyxy[1].item(), xyxy[3].item()])
@@ -62,11 +83,11 @@ def compute_color_for_labels(label):
     return tuple(color)
 
 
-def draw_boxes(img, bbox,identities=None, cluster_labels=None, offset=(0,0)):
+def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
     j = len(cluster_labels)
     for i, box in enumerate(bbox):
-        if i == j:
-            break
+        #if i == j:
+         #   break
         x1, y1, x2, y2 = [int(i) for i in box]
         x1 += offset[0]
         x2 += offset[0]
@@ -74,7 +95,7 @@ def draw_boxes(img, bbox,identities=None, cluster_labels=None, offset=(0,0)):
         y2 += offset[1]
         # box text and bar
         id = int(identities[i]) if identities is not None else 0
-        cluster_id = int(cluster_labels[i]) if cluster_labels is not None else 0
+        cluster_id = int(cluster_labels[i]) * 7 if cluster_labels is not None else 0
         color = compute_color_for_labels(cluster_id)
         label = '{}{:d}'.format("", id)
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
@@ -165,7 +186,6 @@ def detect(opt, save_img=False):
         # Convert distance to bird's eye view
         warped_threshold_pts = cv2.perspectiveTransform(threshold_pts, M)[0]
 
-        print(warped_threshold_pts)
         # Get distance in pixels
         threshold_pixel_dist = np.sqrt(
             (warped_threshold_pts[0][0] - warped_threshold_pts[1][0]) ** 2
@@ -177,6 +197,20 @@ def detect(opt, save_img=False):
             [four_points[0], four_points[1], four_points[3], four_points[2]], np.int32
         )
         cv2.polylines(im0s, [ROI_pts], True, (0, 255, 255), thickness=4)
+
+        shrinked_roi_pts = shrink_ROI_pts(ROI_pts, SHRINK_X, SHRINK_Y)
+        shrinked_roi_pts_arr = np.array(
+            [shrinked_roi_pts[0], shrinked_roi_pts[1], shrinked_roi_pts[2], shrinked_roi_pts[3]], np.int32
+        )
+
+        # create the shrinked crop
+        mask = np.zeros(im0s.shape, dtype=np.uint8)
+        channel_count = im0s.shape[2]
+        ignore_mask_color = (255,) * channel_count
+        cv2.fillPoly(mask, [shrinked_roi_pts_arr], ignore_mask_color)
+        shrinked_ROI_crop = cv2.bitwise_and(im0s, mask)
+
+        #cv2.polylines(im0s, [shrinked_roi_pts_arr], True, (255, 255, 0), thickness=4)
 
         # Inference
         t1 = time_synchronized()
@@ -209,47 +243,58 @@ def detect(opt, save_img=False):
                 person_center_coords = []
                 confs = []
 
+
+                ROI_polygon = Polygon(ROI_pts)
+
                 # Adapt detections to deep sort input format
                 for *xyxy, conf, cls in det:
                     img_h, img_w, _ = im0.shape
                     x_c, y_c, bbox_w, bbox_h = bbox_rel(img_w, img_h, *xyxy)
                     obj = [x_c, y_c, bbox_w, bbox_h]
-                    bbox_xywh.append(obj)
-                    confs.append([conf.item()])
                     single_person_center_coords = [x_c, y_c]
-                    person_center_coords.append(single_person_center_coords)
+                    center_coords_point = Point(single_person_center_coords)
+                    if ROI_polygon.contains(center_coords_point):
+                        person_center_coords.append(single_person_center_coords)
+                        bbox_xywh.append(obj)
+                        confs.append([conf.item()])
 
-                #convert all center coordinates to birds view
+                # convert all center coordinates to birds view
                 warped_pts, bird_image = plot_points_on_bird_eye_view(
                     im0, person_center_coords, M, 1, 1
                 )
 
-                #print("warped points: ")
-                #print(warped_pts)
-
-                # remove negative points from warped points
-                warped_pts_in_range = list(filter(lambda x : x[0] > 0 and x[1] > 0, warped_pts))
+                color = (0, 255, 0)
+                bird_image = cv2.line(bird_image,
+                                      (warped_threshold_pts[0][0], warped_threshold_pts[0][1]),
+                                      (warped_threshold_pts[1][0], warped_threshold_pts[1][1]),
+                                      color,
+                                      5)
 
                 # time for the dbscan to get the cluster groups
-                clusters = DBSCAN(threshold_pixel_dist*1.2, min_samples=1).fit(warped_pts)
-                print("Labels length: ", len(clusters.labels_))
-                print("bbox_xywh length: ", len(bbox_xywh))
+                #clusters = AgglomerativeClustering(None, 'euclidean', None, None, 'auto', "single", threshold_pixel_dist).fit(warped_pts)
+                clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
 
+                print("Warped pts: ", warped_pts)
+                print("PCC: ", person_center_coords)
+                print("Cluster labels: ", clusters.labels_)
                 xywhs = torch.Tensor(bbox_xywh)
                 confss = torch.Tensor(confs)
 
                 # Pass detections to deepsort
-                outputs = deepsort.update(xywhs, confss, im0)
+                outputs = deepsort.update(xywhs, confss, shrinked_ROI_crop, shrink_ROI_pts(ROI_pts, SHRINK_X, SHRINK_Y))
 
-                #print("Output len: ", outputs[:, -1])
+                # print("Output len: ", outputs[:, -1])
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
                     identities = outputs[:, -1]
+                    print("IDs: ", identities)
+                    print("Thresh: ", threshold_pixel_dist)
+                    a_ = plot_lines_between_nodes(warped_pts, bird_image, threshold_pixel_dist)
                     draw_boxes(im0, bbox_xyxy, identities, clusters.labels_)
 
                 # Write MOT compliant results to file
-                if save_txt and len(outputs) != 0:  
+                if save_txt and len(outputs) != 0:
                     for j, output in enumerate(outputs):
                         bbox_left = output[0]
                         bbox_top = output[1]
@@ -258,13 +303,14 @@ def detect(opt, save_img=False):
                         identity = output[-1]
                         with open(txt_path, 'a') as f:
                             f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_left,
-                                    bbox_top, bbox_w, bbox_h, -1, -1, -1, -1))  # label format
+                                                           bbox_top, bbox_w, bbox_h, -1, -1, -1, -1))  # label format
 
             # Print time (inference + NMS)
             print('%sDone. (%.3fs)' % (s, t2 - t1))
 
             # Stream results
             if view_img:
+                #cv2.imshow("bird_image", bird_image)
                 cv2.imshow(p, im0)
                 if cv2.waitKey(1) == ord('q'):  # q to quit
                     raise StopIteration
