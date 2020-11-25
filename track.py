@@ -46,6 +46,29 @@ def get_mouse_points(event, x, y, flags, param):
         mouse_pts.append((x, y))
 
 
+def xywh_to_center_coords(xywh):
+    xyxy = []
+
+    for box_ in enumerate(xywh):
+        box = box_[1]
+        tl_coord = (box[0], box[1])
+        br_coord = (box[2], box[3])
+        x_center = int((tl_coord[0] + br_coord[0]) / 2)
+        y_center = int((tl_coord[1] + br_coord[1]) / 2)
+        center_coords = (x_center, y_center)
+        xyxy.append(center_coords)
+    return xyxy
+
+
+def point_within_ROI(deepsort_output_pt, ROI_polygon):
+    tl_coord = (deepsort_output_pt[0], deepsort_output_pt[1])
+    br_coord = (deepsort_output_pt[2], deepsort_output_pt[3])
+    x_center = (int)((tl_coord[0] + br_coord[0]) / 2)
+    y_center = (int)((tl_coord[1] + br_coord[1]) / 2)
+    center_coord = Point(x_center, y_center)
+    return ROI_polygon.contains(center_coord)
+
+
 def shrink_ROI_pts(coords, x_shrink, y_shrink):
     xs = [i[0] for i in coords]
     ys = [i[1] for i in coords]
@@ -61,6 +84,7 @@ def shrink_ROI_pts(coords, x_shrink, y_shrink):
     # create list of new coordinates
     new_coords = zip(new_xs, new_ys)
     return list(new_coords)
+
 
 def bbox_rel(image_width, image_height, *xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
@@ -86,8 +110,8 @@ def compute_color_for_labels(label):
 def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
     j = len(cluster_labels)
     for i, box in enumerate(bbox):
-        #if i == j:
-         #   break
+        # if i == j:
+        #    break
         x1, y1, x2, y2 = [int(i) for i in box]
         x1 += offset[0]
         x2 += offset[0]
@@ -103,6 +127,17 @@ def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
         cv2.rectangle(img, (x1, y1), (x1 + t_size[0] + 3, y1 + t_size[1] + 4), color, -1)
         cv2.putText(img, label, (x1, y1 + t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
     return img
+
+
+def remove_points_outside_ROI(outputs, ROI_polygon):
+    points_inside_ROI = []
+    ids_inside_ROI = []
+    for point in enumerate(outputs):
+        if point_within_ROI(point[1], ROI_polygon):
+            points_inside_ROI.append(list(point[1][:4]))
+            ids_inside_ROI.append(point[1][-1])
+
+    return (points_inside_ROI, ids_inside_ROI)
 
 
 def detect(opt, save_img=False):
@@ -198,20 +233,6 @@ def detect(opt, save_img=False):
         )
         cv2.polylines(im0s, [ROI_pts], True, (0, 255, 255), thickness=4)
 
-        shrinked_roi_pts = shrink_ROI_pts(ROI_pts, SHRINK_X, SHRINK_Y)
-        shrinked_roi_pts_arr = np.array(
-            [shrinked_roi_pts[0], shrinked_roi_pts[1], shrinked_roi_pts[2], shrinked_roi_pts[3]], np.int32
-        )
-
-        # create the shrinked crop
-        mask = np.zeros(im0s.shape, dtype=np.uint8)
-        channel_count = im0s.shape[2]
-        ignore_mask_color = (255,) * channel_count
-        cv2.fillPoly(mask, [shrinked_roi_pts_arr], ignore_mask_color)
-        shrinked_ROI_crop = cv2.bitwise_and(im0s, mask)
-
-        #cv2.polylines(im0s, [shrinked_roi_pts_arr], True, (255, 255, 0), thickness=4)
-
         # Inference
         t1 = time_synchronized()
         pred = model(img, augment=opt.augment)[0]
@@ -243,7 +264,6 @@ def detect(opt, save_img=False):
                 person_center_coords = []
                 confs = []
 
-
                 ROI_polygon = Polygon(ROI_pts)
 
                 # Adapt detections to deep sort input format
@@ -251,46 +271,44 @@ def detect(opt, save_img=False):
                     img_h, img_w, _ = im0.shape
                     x_c, y_c, bbox_w, bbox_h = bbox_rel(img_w, img_h, *xyxy)
                     obj = [x_c, y_c, bbox_w, bbox_h]
-                    single_person_center_coords = [x_c, y_c]
-                    center_coords_point = Point(single_person_center_coords)
-                    if ROI_polygon.contains(center_coords_point):
-                        person_center_coords.append(single_person_center_coords)
-                        bbox_xywh.append(obj)
-                        confs.append([conf.item()])
+                    bbox_xywh.append(obj)
+                    confs.append([conf.item()])
 
-                # convert all center coordinates to birds view
-                warped_pts, bird_image = plot_points_on_bird_eye_view(
-                    im0, person_center_coords, M, 1, 1
-                )
-
-                color = (0, 255, 0)
-                bird_image = cv2.line(bird_image,
-                                      (warped_threshold_pts[0][0], warped_threshold_pts[0][1]),
-                                      (warped_threshold_pts[1][0], warped_threshold_pts[1][1]),
-                                      color,
-                                      5)
-
-                # time for the dbscan to get the cluster groups
-                #clusters = AgglomerativeClustering(None, 'euclidean', None, None, 'auto', "single", threshold_pixel_dist).fit(warped_pts)
-                clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
-
-                print("Warped pts: ", warped_pts)
-                print("PCC: ", person_center_coords)
-                print("Cluster labels: ", clusters.labels_)
                 xywhs = torch.Tensor(bbox_xywh)
                 confss = torch.Tensor(confs)
 
                 # Pass detections to deepsort
-                outputs = deepsort.update(xywhs, confss, shrinked_ROI_crop, shrink_ROI_pts(ROI_pts, SHRINK_X, SHRINK_Y))
-
+                outputs = deepsort.update(xywhs, confss, im0)
                 # print("Output len: ", outputs[:, -1])
                 # draw boxes for visualization
                 if len(outputs) > 0:
-                    bbox_xyxy = outputs[:, :4]
-                    identities = outputs[:, -1]
-                    print("IDs: ", identities)
-                    print("Thresh: ", threshold_pixel_dist)
-                    a_ = plot_lines_between_nodes(warped_pts, bird_image, threshold_pixel_dist)
+
+                    # filter deepsort output
+                    outputs_in_ROI = remove_points_outside_ROI(outputs, ROI_polygon)
+                    xywh_in_ROI = outputs_in_ROI[0]
+                    ids_in_ROI = outputs_in_ROI[1]
+                    center_coords_in_ROI = xywh_to_center_coords(xywh_in_ROI)
+
+                    # convert all center coordinates to birds view
+                    warped_pts = plot_points_on_bird_eye_view(
+                        im0, center_coords_in_ROI, M, 1, 1
+                    )
+
+                    color = (0, 255, 0)
+                    #bird_image = cv2.line(bird_image,
+                    #                      (warped_threshold_pts[0][0], warped_threshold_pts[0][1]),
+                    #                      (warped_threshold_pts[1][0], warped_threshold_pts[1][1]),
+                    #                      color,
+                    #                      5)
+
+                    #a_ = plot_lines_between_nodes(warped_pts, bird_image, threshold_pixel_dist)
+
+                    # time for the dbscan to get the cluster groups
+                    # clusters = AgglomerativeClustering(None, 'euclidean', None, None, 'auto', "single", threshold_pixel_dist).fit(warped_pts)
+                    clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
+
+                    bbox_xyxy = xywh_in_ROI
+                    identities = ids_in_ROI
                     draw_boxes(im0, bbox_xyxy, identities, clusters.labels_)
 
                 # Write MOT compliant results to file
@@ -310,7 +328,7 @@ def detect(opt, save_img=False):
 
             # Stream results
             if view_img:
-                #cv2.imshow("bird_image", bird_image)
+                # cv2.imshow("bird_image", bird_image)
                 cv2.imshow(p, im0)
                 if cv2.waitKey(1) == ord('q'):  # q to quit
                     raise StopIteration

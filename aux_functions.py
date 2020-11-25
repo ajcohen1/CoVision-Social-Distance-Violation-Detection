@@ -64,7 +64,7 @@ def plot_points_on_bird_eye_view(frame, all_center_coords, M, scale_w, scale_h):
     solid_back_color = (41, 41, 41)
 
     #allocate a blank image for modification
-    blank_image = cv2.warpPerspective(frame, M, (frame_w, frame_h))
+    #blank_image = cv2.warpPerspective(frame, M, (frame_w, frame_h))
 
     #allocate the array for the warped birds eye view person coordinates
     warped_pts = []
@@ -78,15 +78,15 @@ def plot_points_on_bird_eye_view(frame, all_center_coords, M, scale_w, scale_h):
         warped_pt_scaled = [int(warped_pt[0] * scale_w), int(warped_pt[1] * scale_h)]
         warped_pts.append(warped_pt_scaled)
 
-        bird_image = cv2.circle(
-            blank_image,
-            (warped_pt_scaled[0], warped_pt_scaled[1]),
-            node_radius,
-            color_node,
-            thickness_node,
-        )
+        #bird_image = cv2.circle(
+        #    blank_image,
+        #    (warped_pt_scaled[0], warped_pt_scaled[1]),
+        #    node_radius,
+        #    color_node,
+        #    thickness_node,
+        #)
 
-    return warped_pts, bird_image
+    return warped_pts
 
 
 def get_camera_perspective(img, src_points):

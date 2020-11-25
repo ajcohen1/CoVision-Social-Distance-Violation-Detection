@@ -24,15 +24,13 @@ class DeepSort(object):
         metric = NearestNeighborDistanceMetric("cosine", max_cosine_distance, nn_budget)
         self.tracker = Tracker(metric, max_iou_distance=max_iou_distance, max_age=max_age, n_init=n_init)
 
-    def update(self, bbox_xywh, confidences, ori_img, ROI_pts):
+    def update(self, bbox_xywh, confidences, ori_img):
         self.height, self.width = ori_img.shape[:2]
-
-        ROI_polygon = Polygon(ROI_pts)
-
         # generate detections
         features = self._get_features(bbox_xywh, ori_img)
         bbox_tlwh = self._xywh_to_tlwh(bbox_xywh)
-        detections = [Detection(bbox_tlwh[i], conf, features[i]) for i,conf in enumerate(confidences) if conf>self.min_confidence]
+        detections = [Detection(bbox_tlwh[i], conf, features[i]) for i, conf in enumerate(confidences) if
+                      conf > self.min_confidence]
 
         # run on non-maximum supression
         boxes = np.array([d.tlwh for d in detections])
@@ -50,17 +48,11 @@ class DeepSort(object):
             if not track.is_confirmed() or track.time_since_update > 1:
                 continue
             box = track.to_tlwh()
-            x1,y1,x2,y2 = self._tlwh_to_xyxy(box)
-
-            #confirm is in rectangle before adding to tracker
-            center_coord_point = Point(( (x1 + x2) / 2, (y1 + y2) / 2 ))
-            if not ROI_polygon.contains(center_coord_point):
-                continue
-
+            x1, y1, x2, y2 = self._tlwh_to_xyxy(box)
             track_id = track.track_id
-            outputs.append(np.array([x1,y1,x2,y2,track_id], dtype=np.int))
+            outputs.append(np.array([x1, y1, x2, y2, track_id], dtype=np.int))
         if len(outputs) > 0:
-            outputs = np.stack(outputs,axis=0)
+            outputs = np.stack(outputs, axis=0)
         return outputs
 
 
