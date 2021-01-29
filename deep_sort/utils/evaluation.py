@@ -58,7 +58,7 @@ class Evaluator(object):
         iou_distance = mm.distances.iou_matrix(gt_tlwhs, trk_tlwhs, max_iou=0.5)
 
         # acc
-        self.acc.update(gt_ids, trk_ids, iou_distance)
+        self.acc.update_plot(gt_ids, trk_ids, iou_distance)
 
         if rtn_events and iou_distance.size > 0 and hasattr(self.acc, 'last_mot_events'):
             events = self.acc.last_mot_events  # only supported by https://github.com/longcw/py-motmetrics

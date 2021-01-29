@@ -83,7 +83,7 @@ class RealTimeTracking(object):
             cls_conf = cls_conf[mask]
 
             # do tracking
-            outputs = self.deepsort.update(bbox_xywh, cls_conf, im)
+            outputs = self.deepsort.update_plot(bbox_xywh, cls_conf, im)
 
             # draw boxes for visualization
             if len(outputs) > 0:
