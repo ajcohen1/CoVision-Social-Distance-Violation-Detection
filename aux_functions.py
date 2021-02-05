@@ -49,24 +49,31 @@ def plot_lines_between_nodes(warped_points, bird_image, d_thresh):
                 lineThickness,
             )
     # Display Birdeye view
-    #cv2.imshow("Bird Eye View", bird_image)
+    cv2.imshow("Bird Eye View", bird_image)
     #cv2.waitKey(1)
 
     return six_feet_violations, ten_feet_violations, total_pairs, bird_image
 
 
+def resize(img, scale_percent):
+    width = int(img.shape[1] * scale_percent / 100)
+    height = int(img.shape[0] * scale_percent / 100)
+    dim = (width, height)
+    resized = cv2.resize(img, dim, interpolation=cv2.INTER_AREA)
+    return resized
+
 def plot_points_on_bird_eye_view(frame, all_center_coords, M, scale_w, scale_h):
     frame_h = frame.shape[0]
     frame_w = frame.shape[1]
-    node_radius = 10
+    node_radius = 2
     color_node = (192, 133, 156)
     thickness_node = 20
     solid_back_color = (41, 41, 41)
 
     #allocate a blank image for modification
-    #blank_image = cv2.warpPerspective(frame, M, (frame_w, frame_h))
-
-    #allocate the array for the warped birds eye view person coordinates
+    blank_image = cv2.warpPerspective(frame, M, (frame_w, frame_h))
+    blank_image = resize(blank_image, 30)
+    # allocate the array for the warped birds eye view person coordinates
     warped_pts = []
 
     for index in range(len(all_center_coords)):
@@ -78,15 +85,15 @@ def plot_points_on_bird_eye_view(frame, all_center_coords, M, scale_w, scale_h):
         warped_pt_scaled = [int(warped_pt[0] * scale_w), int(warped_pt[1] * scale_h)]
         warped_pts.append(warped_pt_scaled)
 
-        #bird_image = cv2.circle(
-        #    blank_image,
-        #    (warped_pt_scaled[0], warped_pt_scaled[1]),
-        #    node_radius,
-        #    color_node,
-        #    thickness_node,
-        #)
+        bird_image = cv2.circle(
+           blank_image,
+            (int(warped_pt[0] * 0.3), int(warped_pt_scaled[1]*0.3)),
+           node_radius,
+           color_node,
+           thickness_node,
+        )
 
-    return warped_pts
+    return warped_pts, bird_image
 
 
 def get_camera_perspective(img, src_points):

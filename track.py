@@ -33,50 +33,6 @@ SHRINK_Y = 0.1
 
 image = np.zeros(shape=[512, 512, 3], dtype=np.uint8)
 
-plt.ion()
-
-class DynamicUpdate():
-    # Suppose we know the x range
-    min_x = 0
-    max_x = 2000
-    min_y = 0
-    max_y = 2000
-
-    def on_launch(self):
-        # Set up plot
-        self.figure, self.ax = plt.subplots()
-        self.lines, = self.ax.plot([], [], 'o')
-        # Autoscale on unknown axis and known lims on the other
-        #self.ax.set_autoscaley_on(True)
-        self.ax.set_xlim(self.min_x, self.max_x)
-        self.ax.set_ylim(self.min_y, self.max_y)
-        # Other stuff
-        self.ax.grid()
-        ...
-
-    def on_running(self, xdata, ydata):
-        # Update data (with the new _and_ the old points)
-        self.lines.set_xdata(xdata)
-        self.lines.set_ydata(ydata)
-        # Need both of these in order to rescale
-        self.ax.relim()
-        self.ax.autoscale_view()
-        # We need to draw *and* flush
-        self.figure.canvas.draw()
-        self.figure.canvas.flush_events()
-
-    def update_pts(self, warped_pts, clusters):
-        xdata = []
-        ydata = []
-        for i, pt in enumerate(warped_pts):
-            xdata.append(pt[0])
-            ydata.append(pt[1])
-        print("xdata: " + repr(xdata))
-        print("ydata: " + repr(ydata))
-        self.on_running(xdata, ydata)
-
-d = DynamicUpdate()
-d.on_launch()
 
 def get_mouse_points(event, x, y, flags, param):
     # Used to mark 4 points on the frame zero of the video that will be warped
@@ -186,6 +142,7 @@ def remove_points_outside_ROI(outputs, ROI_polygon):
 
 
 def detect(opt, save_img=False):
+    global bird_image
     out, source, weights, view_img, save_txt, imgsz = \
         opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
     webcam = source == '0' or source.startswith('rtsp') or source.startswith('http') or source.endswith('.txt')
@@ -327,7 +284,6 @@ def detect(opt, save_img=False):
                 # print("Output len: ", outputs[:, -1])
                 # draw boxes for visualization
                 if len(outputs) > 0:
-
                     # filter deepsort output
                     outputs_in_ROI = remove_points_outside_ROI(outputs, ROI_polygon)
                     xywh_in_ROI = outputs_in_ROI[0]
@@ -335,19 +291,14 @@ def detect(opt, save_img=False):
                     center_coords_in_ROI = xywh_to_center_coords(xywh_in_ROI)
 
                     # convert all center coordinates to birds view
-                    warped_pts = plot_points_on_bird_eye_view(
+                    warped_pts, bird_image = plot_points_on_bird_eye_view(
                         im0, center_coords_in_ROI, M, 1, 1
                     )
 
                     color = (0, 255, 0)
-                    #bird_image = cv2.line(bird_image,
-                    #                      (warped_threshold_pts[0][0], warped_threshold_pts[0][1]),
-                    #                      (warped_threshold_pts[1][0], warped_threshold_pts[1][1]),
-                    #                      color,
-                    #                      5)
 
-                    #a_ = plot_lines_between_nodes(warped_pts, bird_image, threshold_pixel_dist)
-
+                    # for pt in warped_pts:
+                    #     cv2.circle(bird_image, (pt[0], pt[1]), radius=0, color= (0, 0, 255), thickness=10)
                     # time for the dbscan to get the cluster groups
                     # clusters = AgglomerativeClustering(None, 'euclidean', None, None, 'auto', "single", threshold_pixel_dist).fit(warped_pts)
                     clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
@@ -356,7 +307,10 @@ def detect(opt, save_img=False):
                     identities = ids_in_ROI
                     draw_boxes(im0, bbox_xyxy, identities, clusters.labels_)
 
-                    d.update_pts(warped_pts, clusters)
+                    # embded the bird image to the video
+                    bv_height, bv_width, _ = bird_image.shape
+                    im0[ 0:bv_height, 0:bv_width ] = bird_image
+                    # d.update_pts(warped_pts, clusters)
                     print("HERE--------------------------")
 
                 # Write MOT compliant results to file
@@ -385,6 +339,7 @@ def detect(opt, save_img=False):
             if save_img:
                 print('saving img!')
                 if dataset.mode == 'images':
+                    cv2.imwrite(save_path, bird_image)
                     cv2.imwrite(save_path, im0)
                 else:
                     print('saving video!')
