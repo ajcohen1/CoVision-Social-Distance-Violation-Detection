@@ -1,3 +1,5 @@
+from collections import Counter
+
 from yolov5.utils.datasets import LoadImages, LoadStreams
 from yolov5.utils.general import (
     check_img_size, non_max_suppression, apply_classifier, scale_coords, xyxy2xywh, plot_one_box, strip_optimizer)
@@ -33,6 +35,12 @@ SHRINK_Y = 0.1
 
 image = np.zeros(shape=[512, 512, 3], dtype=np.uint8)
 
+def resize(img, scale_percent):
+    width = int(img.shape[1] * scale_percent / 100)
+    height = int(img.shape[0] * scale_percent / 100)
+    dim = (width, height)
+    resized = cv2.resize(img, dim, interpolation=cv2.INTER_AREA)
+    return resized
 
 def get_mouse_points(event, x, y, flags, param):
     # Used to mark 4 points on the frame zero of the video that will be warped
@@ -109,6 +117,12 @@ def compute_color_for_labels(label):
 
 def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
     j = len(cluster_labels)
+    # key: id, val: [x, y, cluster id, tsize]
+    xy_coords = {}
+    # key: user id; value: cluster id
+    cluster_dict = {}
+    # key: cluster id; value: score
+    cluster_score = {}
     for i, box in enumerate(bbox):
         # if i == j:
         #    break
@@ -120,15 +134,41 @@ def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
         # box text and bar
         id = int(identities[i]) if identities is not None else 0
         cluster_id = int(cluster_labels[i]) * 7 if cluster_labels is not None else 0
+
+        cluster_dict[id] = cluster_id
+        print(cluster_dict)
+
+        cluster_score = Counter(cluster_dict.values())
+        print(cluster_score)
+        """if (cluster_id in cluster_dict):
+            if not(id in cluster_dict[cluster_id]):
+                cluster_dict[cluster_id].append(id)
+        else:
+            cluster_dict[cluster_id] = [id]
+        print("Cluster Dict: ")
+        print(cluster_dict)"""
         color = compute_color_for_labels(cluster_id)
+
+
         label = '{}{:d}'.format("", id)
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
+        xy_coords[id] = [x1, y1, cluster_id, t_size[1]]
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
         cv2.rectangle(img, (x1, y1), (x1 + t_size[0] + 3, y1 + t_size[1] + 4), color, -1)
-        cv2.putText(img, label, (x1, y1 + t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
+        #cv2.putText(img, label, (x1, y1 + t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
+
+    for cID in cluster_dict:
+        risk = 0
+        newx1 = xy_coords[cID][0]
+        newy1 = xy_coords[cID][1]
+        new_label = '{}{:d}'.format("", cID)
+        if xy_coords[cID][2] in cluster_score:
+            risk = cluster_score[xy_coords[cID][2]]
+        new_label = new_label + " Risk: " + str(risk)
+        cv2.putText(img, new_label, (newx1, newy1 + xy_coords[cID][3] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
+
 
     return img
-
 
 def remove_points_outside_ROI(outputs, ROI_polygon):
     points_inside_ROI = []
@@ -213,6 +253,7 @@ def detect(opt, save_img=False):
                     break
                 first_frame_display = False
         four_points = mouse_pts
+        print(four_points)
 
         # Get perspective, M is the transformation matrix for bird's eye view
         M, Minv = get_camera_perspective(image, four_points[0:4])
@@ -291,7 +332,7 @@ def detect(opt, save_img=False):
                     center_coords_in_ROI = xywh_to_center_coords(xywh_in_ROI)
 
                     # convert all center coordinates to birds view
-                    warped_pts, bird_image = plot_points_on_bird_eye_view(
+                    warped_pts = plot_points_on_bird_eye_view(
                         im0, center_coords_in_ROI, M, 1, 1
                     )
 
@@ -301,15 +342,47 @@ def detect(opt, save_img=False):
                     #     cv2.circle(bird_image, (pt[0], pt[1]), radius=0, color= (0, 0, 255), thickness=10)
                     # time for the dbscan to get the cluster groups
                     # clusters = AgglomerativeClustering(None, 'euclidean', None, None, 'auto', "single", threshold_pixel_dist).fit(warped_pts)
-                    clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
+                    clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(xywh_in_ROI)
 
                     bbox_xyxy = xywh_in_ROI
                     identities = ids_in_ROI
                     draw_boxes(im0, bbox_xyxy, identities, clusters.labels_)
 
+                    frame_h = im0.shape[0]
+                    frame_w = im0.shape[1]
+                    node_radius = int(threshold_pixel_dist*0.3)
+                    color_node = (192, 133, 156)
+                    thickness_node = 2
+                    solid_back_color = (41, 41, 41)
+                    # allocate a blank image for modification
+                    background = cv2.imread('testpic.jpg', cv2.IMREAD_COLOR)
+                    blank_image = cv2.warpPerspective(background, M, (frame_w, frame_h))
+                    blank_image = resize(blank_image, 30)
+                    for index, warped_pt in enumerate(warped_pts):
+                        cluster_id = int(clusters.labels_[index]) * 7 if clusters.labels_[index] is not None else 0
+                        bird_image = cv2.circle(
+                        blank_image,
+                        (int(warped_pt[0] * 0.3), int(warped_pt[1] * 0.3)),
+                        node_radius,
+                        compute_color_for_labels(cluster_id),
+                        thickness_node,
+                        )
+                        bird_image = cv2.circle(
+                        blank_image,
+                        (int(warped_pt[0] * 0.3), int(warped_pt[1] * 0.3)),
+                        1,
+                        compute_color_for_labels(cluster_id),
+                        7,
+                        )
+
                     # embded the bird image to the video
                     bv_height, bv_width, _ = bird_image.shape
-                    im0[ 0:bv_height, 0:bv_width ] = bird_image
+                    frame_x_center, frame_y_center = frame_w //2, frame_h//2
+                    x_offset = 20
+
+
+                    im0[ frame_y_center-bv_height//2:frame_y_center+bv_height//2, \
+                        x_offset:bv_width+x_offset ] = bird_image
                     # d.update_pts(warped_pts, clusters)
                     print("HERE--------------------------")
 

@@ -65,14 +65,15 @@ def resize(img, scale_percent):
 def plot_points_on_bird_eye_view(frame, all_center_coords, M, scale_w, scale_h):
     frame_h = frame.shape[0]
     frame_w = frame.shape[1]
-    node_radius = 2
-    color_node = (192, 133, 156)
-    thickness_node = 20
-    solid_back_color = (41, 41, 41)
-
-    #allocate a blank image for modification
-    blank_image = cv2.warpPerspective(frame, M, (frame_w, frame_h))
-    blank_image = resize(blank_image, 30)
+    # node_radius = 2
+    # color_node = (192, 133, 156)
+    # thickness_node = 20
+    # solid_back_color = (41, 41, 41)
+    #
+    # #allocate a blank image for modification
+    # background = cv2.imread('testpic.jpg', cv2.IMREAD_COLOR)
+    # blank_image = cv2.warpPerspective(background, M, (frame_w, frame_h))
+    # blank_image = resize(blank_image, 30)
     # allocate the array for the warped birds eye view person coordinates
     warped_pts = []
 
@@ -85,15 +86,15 @@ def plot_points_on_bird_eye_view(frame, all_center_coords, M, scale_w, scale_h):
         warped_pt_scaled = [int(warped_pt[0] * scale_w), int(warped_pt[1] * scale_h)]
         warped_pts.append(warped_pt_scaled)
 
-        bird_image = cv2.circle(
-           blank_image,
-            (int(warped_pt[0] * 0.3), int(warped_pt_scaled[1]*0.3)),
-           node_radius,
-           color_node,
-           thickness_node,
-        )
+        # bird_image = cv2.circle(
+        #    blank_image,
+        #     (int(warped_pt[0] * 0.3), int(warped_pt_scaled[1]*0.3)),
+        #    node_radius,
+        #    color_node,
+        #    thickness_node,
+        # )
 
-    return warped_pts, bird_image
+    return warped_pts
 
 
 def get_camera_perspective(img, src_points):
