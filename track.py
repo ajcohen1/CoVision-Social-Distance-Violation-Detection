@@ -153,8 +153,8 @@ def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
         label = '{}{:d}'.format("", id)
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
         xy_coords[id] = [x1, y1, cluster_id, t_size[1]]
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
-        cv2.rectangle(img, (x1, y1), (x1 + t_size[0] + 3, y1 + t_size[1] + 4), color, -1)
+        # cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
+        # cv2.rectangle(img, (x1, y1), (x1 + t_size[0] + 3, y1 + t_size[1] + 4), color, -1)
         #cv2.putText(img, label, (x1, y1 + t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
 
     for cID in cluster_dict:
@@ -332,17 +332,18 @@ def detect(opt, save_img=False):
                     center_coords_in_ROI = xywh_to_center_coords(xywh_in_ROI)
 
                     # convert all center coordinates to birds view
-                    warped_pts = plot_points_on_bird_eye_view(
-                        im0, center_coords_in_ROI, M, 1, 1
-                    )
-
+                    # warped_pts = plot_points_on_bird_eye_view(
+                    #     im0, center_coords_in_ROI, M, 1, 1
+                    # )
+                    perspective_preprocessing_ptrs = [ np.array([[[pt[0], pt[1]]]], dtype="float32") for pt in center_coords_in_ROI]
+                    warped_pts = [cv2.perspectiveTransform(pt, M)[0][0] for pt in perspective_preprocessing_ptrs]
                     color = (0, 255, 0)
 
                     # for pt in warped_pts:
                     #     cv2.circle(bird_image, (pt[0], pt[1]), radius=0, color= (0, 0, 255), thickness=10)
                     # time for the dbscan to get the cluster groups
                     # clusters = AgglomerativeClustering(None, 'euclidean', None, None, 'auto', "single", threshold_pixel_dist).fit(warped_pts)
-                    clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(xywh_in_ROI)
+                    clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
 
                     bbox_xyxy = xywh_in_ROI
                     identities = ids_in_ROI
@@ -350,31 +351,30 @@ def detect(opt, save_img=False):
 
                     frame_h = im0.shape[0]
                     frame_w = im0.shape[1]
-                    node_radius = int(threshold_pixel_dist*0.3)
+                    node_radius = int(threshold_pixel_dist*0.5)
                     color_node = (192, 133, 156)
-                    thickness_node = 2
+                    thickness_node = 4
                     solid_back_color = (41, 41, 41)
                     # allocate a blank image for modification
                     background = cv2.imread('testpic.jpg', cv2.IMREAD_COLOR)
                     blank_image = cv2.warpPerspective(background, M, (frame_w, frame_h))
-                    blank_image = resize(blank_image, 30)
                     for index, warped_pt in enumerate(warped_pts):
                         cluster_id = int(clusters.labels_[index]) * 7 if clusters.labels_[index] is not None else 0
                         bird_image = cv2.circle(
                         blank_image,
-                        (int(warped_pt[0] * 0.3), int(warped_pt[1] * 0.3)),
+                        (int(warped_pt[0]), int(warped_pt[1])),
                         node_radius,
                         compute_color_for_labels(cluster_id),
                         thickness_node,
                         )
                         bird_image = cv2.circle(
                         blank_image,
-                        (int(warped_pt[0] * 0.3), int(warped_pt[1] * 0.3)),
+                        (int(warped_pt[0]), int(warped_pt[1])),
                         1,
                         compute_color_for_labels(cluster_id),
-                        7,
+                        15,
                         )
-
+                    bird_image = resize(blank_image, 30)
                     # embded the bird image to the video
                     bv_height, bv_width, _ = bird_image.shape
                     frame_x_center, frame_y_center = frame_w //2, frame_h//2
