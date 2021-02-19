@@ -1,3 +1,4 @@
 ./inference/output/test.mp4
 *.xml
 *.iml
+*.pyc

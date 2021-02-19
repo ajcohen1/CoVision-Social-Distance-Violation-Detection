@@ -35,6 +35,22 @@ SHRINK_Y = 0.1
 
 image = np.zeros(shape=[512, 512, 3], dtype=np.uint8)
 
+window_size = 5
+person_list = {}
+
+def get_coords_avg(avg_list):
+    avg_x = 0
+    avg_y = 0
+    for past_coords in avg_list:
+        if past_coords[0] == -1 and past_coords[1] == -1:
+            continue
+        avg_x += past_coords[0]
+        avg_y += past_coords[1]
+    avg_x /= window_size
+    avg_y /= window_size
+
+    return avg_x, avg_y
+
 def resize(img, scale_percent):
     width = int(img.shape[1] * scale_percent / 100)
     height = int(img.shape[0] * scale_percent / 100)
@@ -107,11 +123,11 @@ def bbox_rel(image_width, image_height, *xyxy):
     return x_c, y_c, w, h
 
 
-def compute_color_for_labels(label):
+def compute_color_for_labels(risk_factor):
     """
     Simple function that adds fixed color depending on the class
     """
-    if (label) > 1:
+    if (risk_factor) > 1:
         return [0, 0, 255]
     return [0, 128, 0]
 
@@ -352,6 +368,19 @@ def detect(opt, save_img=False):
                     bbox_xyxy = xywh_in_ROI
                     identities = ids_in_ROI
                     draw_boxes(im0, bbox_xyxy, identities, clusters.labels_)
+
+                    for num_id, p_id in enumerate(identities):
+                        p_coord = warped_pts[num_id]
+                        if not person_list.__contains__(p_id):
+                            avg_list = [(-1, -1) for iter in range(window_size)]
+                            person_list[p_id] = 0, avg_list
+                        count, avg_list = person_list.get(p_id)
+                        avg_list[count] = p_coord
+                        count = (count + 1) % window_size
+                        person_list[p_id] = count, avg_list
+                        avg_x, avg_y = get_coords_avg(avg_list)
+                        warped_pts[num_id] = (avg_x, avg_y)
+
 
                     frame_h = im0.shape[0]
                     frame_w = im0.shape[1]
