@@ -362,20 +362,22 @@ def detect(opt, save_img=False):
                     # allocate a blank image for modification
                     background = cv2.imread('testpic.jpg', cv2.IMREAD_COLOR)
                     blank_image = cv2.warpPerspective(background, M, (frame_w, frame_h))
+
+                    cluster_scores = Counter(clusters.labels_)
                     for index, warped_pt in enumerate(warped_pts):
-                        cluster_id = int(clusters.labels_[index]) * 7 if clusters.labels_[index] is not None else 0
+                        cluster_id = clusters.labels_[index]
                         bird_image = cv2.circle(
                         blank_image,
                         (int(warped_pt[0]), int(warped_pt[1])),
                         node_radius,
-                        compute_color_for_labels(cluster_id),
+                        compute_color_for_labels(cluster_scores[cluster_id]),
                         thickness_node,
                         )
                         bird_image = cv2.circle(
                         blank_image,
                         (int(warped_pt[0]), int(warped_pt[1])),
                         1,
-                        compute_color_for_labels(cluster_id),
+                        compute_color_for_labels(cluster_scores[cluster_id]),
                         15,
                         )
                     bird_image = resize(blank_image, 30)
