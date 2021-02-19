@@ -341,7 +341,7 @@ def detect(opt, save_img=False):
                 confss = torch.Tensor(confs)
 
                 # Pass detections to deepsort
-                outputs = deepsort.update(xywhs, confss, im0)
+                #outputs = deepsort.update(xywhs, confss, im0)
                 # print("Output len: ", outputs[:, -1])
                 # draw boxes for visualization
                 if len(outputs) > 0:
@@ -369,17 +369,17 @@ def detect(opt, save_img=False):
                     identities = ids_in_ROI
                     draw_boxes(im0, bbox_xyxy, identities, clusters.labels_)
 
-                    for num_id, p_id in enumerate(identities):
-                        p_coord = warped_pts[num_id]
-                        if not person_list.__contains__(p_id):
-                            avg_list = [(-1, -1) for iter in range(window_size)]
-                            person_list[p_id] = 0, avg_list
-                        count, avg_list = person_list.get(p_id)
-                        avg_list[count] = p_coord
-                        count = (count + 1) % window_size
-                        person_list[p_id] = count, avg_list
-                        avg_x, avg_y = get_coords_avg(avg_list)
-                        warped_pts[num_id] = (avg_x, avg_y)
+                    # for num_id, p_id in enumerate(identities):
+                    #     p_coord = warped_pts[num_id]
+                    #     if not person_list.__contains__(p_id):
+                    #         avg_list = [(-1, -1) for iter in range(window_size)]
+                    #         person_list[p_id] = 0, avg_list
+                    #     count, avg_list = person_list.get(p_id)
+                    #     avg_list[count] = p_coord
+                    #     count = (count + 1) % window_size
+                    #     person_list[p_id] = count, avg_list
+                    #     avg_x, avg_y = get_coords_avg(avg_list)
+                    #     warped_pts[num_id] = (avg_x, avg_y)
 
 
                     frame_h = im0.shape[0]
