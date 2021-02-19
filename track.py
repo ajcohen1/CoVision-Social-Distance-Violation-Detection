@@ -13,8 +13,8 @@ import argparse
 import os
 import platform
 import shutil
-import matplotlib.pyplot as plt
-import time
+from birdeye_utils import birdeye_transformer
+from birdeye_utils import birdeye_video_writer
 from pathlib import Path
 import cv2
 import torch
@@ -273,7 +273,6 @@ def detect(opt, save_img=False):
                     break
                 first_frame_display = False
         four_points = mouse_pts
-        print(four_points)
 
         # Get perspective, M is the transformation matrix for bird's eye view
         M, Minv = get_camera_perspective(image, four_points[0:4])
@@ -289,6 +288,10 @@ def detect(opt, save_img=False):
             (warped_threshold_pts[0][0] - warped_threshold_pts[1][0]) ** 2
             + (warped_threshold_pts[0][1] - warped_threshold_pts[1][1]) ** 2
         )
+
+        #initialize birdeye view video writer
+        frame_h, frame_w, _ = image.shape
+        bevw = birdeye_video_writer.birdeye_video_writer(frame_h, frame_w, M, threshold_pixel_dist)
 
         # Draw the ROI on the output images
         ROI_pts = np.array(
@@ -318,11 +321,6 @@ def detect(opt, save_img=False):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
-                # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
-                    s += '%g %ss, ' % (n, names[int(c)])  # add to string
-
                 bbox_xywh = []
                 person_center_coords = []
                 confs = []
@@ -341,8 +339,8 @@ def detect(opt, save_img=False):
                 confss = torch.Tensor(confs)
 
                 # Pass detections to deepsort
-                #outputs = deepsort.update(xywhs, confss, im0)
-                # print("Output len: ", outputs[:, -1])
+                outputs = deepsort.update(xywhs, confss, im0)
+
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     # filter deepsort output
@@ -351,18 +349,8 @@ def detect(opt, save_img=False):
                     ids_in_ROI = outputs_in_ROI[1]
                     center_coords_in_ROI = xywh_to_center_coords(xywh_in_ROI)
 
-                    # convert all center coordinates to birds view
-                    # warped_pts = plot_points_on_bird_eye_view(
-                    #     im0, center_coords_in_ROI, M, 1, 1
-                    # )
-                    perspective_preprocessing_ptrs = [ np.array([[[pt[0], pt[1]]]], dtype="float32") for pt in center_coords_in_ROI]
-                    warped_pts = [cv2.perspectiveTransform(pt, M)[0][0] for pt in perspective_preprocessing_ptrs]
-                    color = (0, 255, 0)
+                    warped_pts = birdeye_transformer.transform_center_coords_to_birdeye(center_coords_in_ROI, M)
 
-                    # for pt in warped_pts:
-                    #     cv2.circle(bird_image, (pt[0], pt[1]), radius=0, color= (0, 0, 255), thickness=10)
-                    # time for the dbscan to get the cluster groups
-                    # clusters = AgglomerativeClustering(None, 'euclidean', None, None, 'auto', "single", threshold_pixel_dist).fit(warped_pts)
                     clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
 
                     bbox_xyxy = xywh_in_ROI
@@ -382,35 +370,10 @@ def detect(opt, save_img=False):
                     #     warped_pts[num_id] = (avg_x, avg_y)
 
 
-                    frame_h = im0.shape[0]
-                    frame_w = im0.shape[1]
-                    node_radius = int(threshold_pixel_dist*0.5)
-                    color_node = (192, 133, 156)
-                    thickness_node = 4
-                    solid_back_color = (41, 41, 41)
-                    # allocate a blank image for modification
-                    background = cv2.imread('testpic.jpg', cv2.IMREAD_COLOR)
-                    blank_image = cv2.warpPerspective(background, M, (frame_w, frame_h))
-
-                    cluster_scores = Counter(clusters.labels_)
-                    for index, warped_pt in enumerate(warped_pts):
-                        cluster_id = clusters.labels_[index]
-                        bird_image = cv2.circle(
-                        blank_image,
-                        (int(warped_pt[0]), int(warped_pt[1])),
-                        node_radius,
-                        compute_color_for_labels(cluster_scores[cluster_id]),
-                        thickness_node,
-                        )
-                        bird_image = cv2.circle(
-                        blank_image,
-                        (int(warped_pt[0]), int(warped_pt[1])),
-                        1,
-                        compute_color_for_labels(cluster_scores[cluster_id]),
-                        15,
-                        )
-                    bird_image = resize(blank_image, 30)
                     # embded the bird image to the video
+                    risk_dict = Counter(clusters.labels_)
+                    bird_image = bevw.create_birdeye_frame(warped_pts, clusters.labels_, risk_dict)
+                    bird_image = resize(bird_image, 30)
                     bv_height, bv_width, _ = bird_image.shape
                     frame_x_center, frame_y_center = frame_w //2, frame_h//2
                     x_offset = 20
@@ -418,8 +381,6 @@ def detect(opt, save_img=False):
 
                     im0[ frame_y_center-bv_height//2:frame_y_center+bv_height//2, \
                         x_offset:bv_width+x_offset ] = bird_image
-                    # d.update_pts(warped_pts, clusters)
-                    print("HERE--------------------------")
 
                 # Write MOT compliant results to file
                 if save_txt and len(outputs) != 0:
