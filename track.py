@@ -111,8 +111,9 @@ def compute_color_for_labels(label):
     """
     Simple function that adds fixed color depending on the class
     """
-    color = [int((p * (label ** 2 - label + 1)) % 255) for p in palette]
-    return tuple(color)
+    if (label) > 1:
+        return [0, 0, 255]
+    return [0, 128, 0]
 
 
 def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
@@ -136,10 +137,10 @@ def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
         cluster_id = int(cluster_labels[i]) * 7 if cluster_labels is not None else 0
 
         cluster_dict[id] = cluster_id
-        print(cluster_dict)
+        # print(cluster_dict)
 
         cluster_score = Counter(cluster_dict.values())
-        print(cluster_score)
+        # print(cluster_score)
         """if (cluster_id in cluster_dict):
             if not(id in cluster_dict[cluster_id]):
                 cluster_dict[cluster_id].append(id)
@@ -149,24 +150,27 @@ def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
         print(cluster_dict)"""
         color = compute_color_for_labels(cluster_id)
 
-
         label = '{}{:d}'.format("", id)
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
-        xy_coords[id] = [x1, y1, cluster_id, t_size[1]]
+        xy_coords[id] = [x1, y1, x2, y2, cluster_id, t_size[1]]
         # cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
         # cv2.rectangle(img, (x1, y1), (x1 + t_size[0] + 3, y1 + t_size[1] + 4), color, -1)
-        #cv2.putText(img, label, (x1, y1 + t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
+        # cv2.putText(img, label, (x1, y1 + t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
 
     for cID in cluster_dict:
         risk = 0
         newx1 = xy_coords[cID][0]
         newy1 = xy_coords[cID][1]
-        new_label = '{}{:d}'.format("", cID)
-        if xy_coords[cID][2] in cluster_score:
-            risk = cluster_score[xy_coords[cID][2]]
-        new_label = new_label + " Risk: " + str(risk)
-        cv2.putText(img, new_label, (newx1, newy1 + xy_coords[cID][3] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
-
+        newx2 = xy_coords[cID][2]
+        newy2 = xy_coords[cID][3]
+        if xy_coords[cID][4] in cluster_score:
+            risk = cluster_score[xy_coords[cID][4]]
+        color = compute_color_for_labels(risk)
+        new_label = '{}{:d}'.format("", risk)
+        new_label = "Risk: " + new_label
+        cv2.rectangle(img, (newx1, newy1), (newx2, newy2), color, 3)
+        cv2.putText(img, new_label, (newx1, newy1 + xy_coords[cID][5] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255],
+                    2)
 
     return img
 
