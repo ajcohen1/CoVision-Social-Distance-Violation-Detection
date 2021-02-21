@@ -289,14 +289,15 @@ def detect(opt, save_img=False):
             + (warped_threshold_pts[0][1] - warped_threshold_pts[1][1]) ** 2
         )
 
-        #initialize birdeye view video writer
-        frame_h, frame_w, _ = image.shape
-        bevw = birdeye_video_writer.birdeye_video_writer(frame_h, frame_w, M, threshold_pixel_dist)
-
         # Draw the ROI on the output images
         ROI_pts = np.array(
             [four_points[0], four_points[1], four_points[3], four_points[2]], np.int32
         )
+
+        # initialize birdeye view video writer
+        frame_h, frame_w, _ = image.shape
+        bevw = birdeye_video_writer.birdeye_video_writer(frame_h, frame_w, M, threshold_pixel_dist, ROI_pts)
+
         cv2.polylines(im0s, [ROI_pts], True, (0, 255, 255), thickness=4)
 
         # Inference
