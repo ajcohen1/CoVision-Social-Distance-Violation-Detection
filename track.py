@@ -73,8 +73,7 @@ def get_mouse_points(event, x, y, flags, param):
 def xywh_to_center_coords(xywh):
     xyxy = []
 
-    for box_ in enumerate(xywh):
-        box = box_[1]
+    for index, box in enumerate(xywh):
         tl_coord = (box[0], box[1])
         br_coord = (box[2], box[3])
         x_center = int((tl_coord[0] + br_coord[0]) / 2)
@@ -132,7 +131,7 @@ def compute_color_for_labels(risk_factor):
     return [0, 128, 0]
 
 
-def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
+def draw_boxes(img, bbox, cluster_labels=None, offset=(0, 0)):
     j = len(cluster_labels)
     # key: id, val: [x, y, cluster id, tsize]
     xy_coords = {}
@@ -149,10 +148,9 @@ def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
         y1 += offset[1]
         y2 += offset[1]
         # box text and bar
-        id = int(identities[i]) if identities is not None else 0
         cluster_id = int(cluster_labels[i]) * 7 if cluster_labels is not None else 0
 
-        cluster_dict[id] = cluster_id
+        cluster_dict[i] = cluster_id
         # print(cluster_dict)
 
         cluster_score = Counter(cluster_dict.values())
@@ -166,9 +164,9 @@ def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
         print(cluster_dict)"""
         color = compute_color_for_labels(cluster_id)
 
-        label = '{}{:d}'.format("", id)
+        label = '{}{:d}'.format("", i)
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
-        xy_coords[id] = [x1, y1, x2, y2, cluster_id, t_size[1]]
+        xy_coords[i] = [x1, y1, x2, y2, cluster_id, t_size[1]]
         # cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
         # cv2.rectangle(img, (x1, y1), (x1 + t_size[0] + 3, y1 + t_size[1] + 4), color, -1)
         # cv2.putText(img, label, (x1, y1 + t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
@@ -192,12 +190,9 @@ def draw_boxes(img, bbox, identities=None, cluster_labels=None, offset=(0, 0)):
 
 def remove_points_outside_ROI(outputs, ROI_polygon):
     points_inside_ROI = []
-    ids_inside_ROI = []
     for point in enumerate(outputs):
         if point_within_ROI(point[1], ROI_polygon):
             points_inside_ROI.append(list(point[1][:4]))
-            #ids_inside_ROI.append(point[1][-1])
-
     return points_inside_ROI
 
 
@@ -323,8 +318,7 @@ def detect(opt, save_img=False):
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
                 bbox_xywh = []
-                person_center_coords = []
-                confs = []
+                bbox_xyxy = []
 
                 ROI_polygon = Polygon(ROI_pts)
 
@@ -333,30 +327,22 @@ def detect(opt, save_img=False):
                     img_h, img_w, _ = im0.shape
                     x_c, y_c, bbox_w, bbox_h = bbox_rel(img_w, img_h, *xyxy)
                     obj = [x_c, y_c, bbox_w, bbox_h]
+
+                    bbox_xyxy.append(xyxy)
                     bbox_xywh.append(obj)
-                    #confs.append([conf.item()])
-
-                #xywhs = torch.Tensor(bbox_xywh)
-                #confss = torch.Tensor(confs)
-
-                # Pass detections to deepsort
-                #outputs = deepsort.update(xywhs, confss, im0)
 
                 # draw boxes for visualization
                 if len(bbox_xywh) > 0:
                     # filter deepsort output
-                    outputs_in_ROI = remove_points_outside_ROI(bbox_xywh, ROI_polygon)
-                    xywh_in_ROI = outputs_in_ROI[0]
-                    #ids_in_ROI = outputs_in_ROI[1]
-                    center_coords_in_ROI = xywh_to_center_coords(xywh_in_ROI)
+                    outputs_in_ROI = remove_points_outside_ROI(bbox_xyxy, ROI_polygon)
+                    tlbr_in_ROI = outputs_in_ROI
+                    center_coords_in_ROI = xywh_to_center_coords(outputs_in_ROI)
+                    print("Center Coords: ", center_coords_in_ROI)
 
                     warped_pts = birdeye_transformer.transform_center_coords_to_birdeye(center_coords_in_ROI, M)
 
                     clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
-
-                    bbox_xyxy = xywh_in_ROI
-                    #identities = ids_in_ROI
-                    draw_boxes(im0, bbox_xyxy, identities, clusters.labels_)
+                    draw_boxes(im0, outputs_in_ROI, clusters.labels_)
 
                     # for num_id, p_id in enumerate(identities):
                     #     p_coord = warped_pts[num_id]
@@ -384,8 +370,8 @@ def detect(opt, save_img=False):
                         x_offset:bv_width+x_offset ] = bird_image
 
                 # Write MOT compliant results to file
-                if save_txt and len(outputs) != 0:
-                    for j, output in enumerate(outputs):
+                if save_txt and len(outputs_in_ROI) != 0:
+                    for j, output in enumerate(outputs_in_ROI):
                         bbox_left = output[0]
                         bbox_top = output[1]
                         bbox_w = output[2]
