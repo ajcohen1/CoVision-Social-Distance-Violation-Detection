@@ -4,8 +4,8 @@ from yolov5.utils.datasets import LoadImages, LoadStreams
 from yolov5.utils.general import (
     check_img_size, non_max_suppression, apply_classifier, scale_coords, xyxy2xywh, plot_one_box, strip_optimizer)
 from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
-from deep_sort.utils.parser import get_config
-from deep_sort.deep_sort import DeepSort
+#from deep_sort.utils.parser import get_config
+#from deep_sort.deep_sort import DeepSort
 from sklearn.cluster import DBSCAN, AgglomerativeClustering
 from shapely.geometry import Point
 from shapely.geometry.polygon import Polygon
@@ -196,9 +196,9 @@ def remove_points_outside_ROI(outputs, ROI_polygon):
     for point in enumerate(outputs):
         if point_within_ROI(point[1], ROI_polygon):
             points_inside_ROI.append(list(point[1][:4]))
-            ids_inside_ROI.append(point[1][-1])
+            #ids_inside_ROI.append(point[1][-1])
 
-    return (points_inside_ROI, ids_inside_ROI)
+    return points_inside_ROI
 
 
 def detect(opt, save_img=False):
@@ -212,13 +212,13 @@ def detect(opt, save_img=False):
     cv2.setMouseCallback("image", get_mouse_points)
 
     # initialize deepsort
-    cfg = get_config()
-    cfg.merge_from_file(opt.config_deepsort)
-    deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
-                        max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
-                        nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
-                        max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
-                        use_cuda=True)
+    # cfg = get_config()
+    # cfg.merge_from_file(opt.config_deepsort)
+    # deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
+    #                     max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
+    #                     nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
+    #                     max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
+    #                     use_cuda=True)
 
     # Initialize
     device = select_device(opt.device)
@@ -333,20 +333,20 @@ def detect(opt, save_img=False):
                     x_c, y_c, bbox_w, bbox_h = bbox_rel(img_w, img_h, *xyxy)
                     obj = [x_c, y_c, bbox_w, bbox_h]
                     bbox_xywh.append(obj)
-                    confs.append([conf.item()])
+                    #confs.append([conf.item()])
 
-                xywhs = torch.Tensor(bbox_xywh)
-                confss = torch.Tensor(confs)
+                #xywhs = torch.Tensor(bbox_xywh)
+                #confss = torch.Tensor(confs)
 
                 # Pass detections to deepsort
-                outputs = deepsort.update(xywhs, confss, im0)
+                #outputs = deepsort.update(xywhs, confss, im0)
 
                 # draw boxes for visualization
-                if len(outputs) > 0:
+                if len(bbox_xywh) > 0:
                     # filter deepsort output
-                    outputs_in_ROI = remove_points_outside_ROI(outputs, ROI_polygon)
+                    outputs_in_ROI = remove_points_outside_ROI(bbox_xywh, ROI_polygon)
                     xywh_in_ROI = outputs_in_ROI[0]
-                    ids_in_ROI = outputs_in_ROI[1]
+                    #ids_in_ROI = outputs_in_ROI[1]
                     center_coords_in_ROI = xywh_to_center_coords(xywh_in_ROI)
 
                     warped_pts = birdeye_transformer.transform_center_coords_to_birdeye(center_coords_in_ROI, M)
@@ -354,7 +354,7 @@ def detect(opt, save_img=False):
                     clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
 
                     bbox_xyxy = xywh_in_ROI
-                    identities = ids_in_ROI
+                    #identities = ids_in_ROI
                     draw_boxes(im0, bbox_xyxy, identities, clusters.labels_)
 
                     # for num_id, p_id in enumerate(identities):
