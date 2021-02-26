@@ -23,6 +23,7 @@ import torch.backends.cudnn as cudnn
 import sys
 import numpy as np
 from aux_functions import *
+from dynamic_plotter import *
 
 sys.path.insert(0, './yolov5')
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -195,6 +196,8 @@ def remove_points_outside_ROI(outputs, ROI_polygon):
             points_inside_ROI.append(list(point[1][:4]))
     return points_inside_ROI
 
+def compute_frame_rf(risk_dict):
+    return sum(risk_dict.values())
 
 def detect(opt, save_img=False):
     global bird_image
@@ -205,15 +208,6 @@ def detect(opt, save_img=False):
     # initialize the ROI frame
     cv2.namedWindow("image")
     cv2.setMouseCallback("image", get_mouse_points)
-
-    # initialize deepsort
-    # cfg = get_config()
-    # cfg.merge_from_file(opt.config_deepsort)
-    # deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
-    #                     max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
-    #                     nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
-    #                     max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
-    #                     use_cuda=True)
 
     # Initialize
     device = select_device(opt.device)
@@ -249,6 +243,12 @@ def detect(opt, save_img=False):
 
     save_path = str(Path(out))
     txt_path = str(Path(out)) + '/results.txt'
+
+    d = DynamicUpdate()
+    d.on_launch()
+
+    risk_factors = []
+    frame_nums = []
 
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
         img = torch.from_numpy(img).to(device)
@@ -344,19 +344,6 @@ def detect(opt, save_img=False):
                     clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
                     draw_boxes(im0, outputs_in_ROI, clusters.labels_)
 
-                    # for num_id, p_id in enumerate(identities):
-                    #     p_coord = warped_pts[num_id]
-                    #     if not person_list.__contains__(p_id):
-                    #         avg_list = [(-1, -1) for iter in range(window_size)]
-                    #         person_list[p_id] = 0, avg_list
-                    #     count, avg_list = person_list.get(p_id)
-                    #     avg_list[count] = p_coord
-                    #     count = (count + 1) % window_size
-                    #     person_list[p_id] = count, avg_list
-                    #     avg_x, avg_y = get_coords_avg(avg_list)
-                    #     warped_pts[num_id] = (avg_x, avg_y)
-
-
                     # embded the bird image to the video
                     risk_dict = Counter(clusters.labels_)
                     bird_image = bevw.create_birdeye_frame(warped_pts, clusters.labels_, risk_dict)
@@ -368,6 +355,13 @@ def detect(opt, save_img=False):
 
                     im0[ frame_y_center-bv_height//2:frame_y_center+bv_height//2, \
                         x_offset:bv_width+x_offset ] = bird_image
+
+
+                    #write the risk graph
+
+                    risk_factors += [compute_frame_rf(risk_dict)]
+                    frame_nums += [frame_idx]
+                    d.on_running(frame_nums, risk_factors)
 
                 # Write MOT compliant results to file
                 if save_txt and len(outputs_in_ROI) != 0:
