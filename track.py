@@ -197,7 +197,7 @@ def remove_points_outside_ROI(outputs, ROI_polygon):
     return points_inside_ROI
 
 def compute_frame_rf(risk_dict):
-    return sum(risk_dict.values())
+    return sum(risk_dict.values()) + len(risk_dict.values())
 
 def detect(opt, save_img=False):
     global bird_image

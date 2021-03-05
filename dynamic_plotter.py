@@ -9,7 +9,7 @@ class DynamicUpdate():
         # Autoscale on unknown axis and known lims on the other
         #self.ax.set_autoscaley_on(False)
         # Other stuff
-        self.ax.grid()
+        #self.ax.grid()
         #self.ax.set_xlim(0, 20)
         self.ax.set_ylim(0, 20)
         ...
