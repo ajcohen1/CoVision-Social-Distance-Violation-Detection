@@ -4,8 +4,8 @@ from yolov5.utils.datasets import LoadImages, LoadStreams
 from yolov5.utils.general import (
     check_img_size, non_max_suppression, apply_classifier, scale_coords, xyxy2xywh, plot_one_box, strip_optimizer)
 from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
-#from deep_sort.utils.parser import get_config
-#from deep_sort.deep_sort import DeepSort
+from deep_sort.utils.parser import get_config
+from deep_sort.deep_sort import DeepSort
 from sklearn.cluster import DBSCAN, AgglomerativeClustering
 from shapely.geometry import Point
 from shapely.geometry.polygon import Polygon
@@ -16,7 +16,7 @@ import shutil
 from birdeye_utils import birdeye_transformer
 from birdeye_utils import birdeye_video_writer
 from pathlib import Path
-import cv2
+import movingAverage
 import torch
 import torch.backends.cudnn as cudnn
 # https://github.com/pytorch/pytorch/issues/3678
@@ -191,10 +191,12 @@ def draw_boxes(img, bbox, cluster_labels=None, offset=(0, 0)):
 
 def remove_points_outside_ROI(outputs, ROI_polygon):
     points_inside_ROI = []
+    ids_inside_ROI = []
     for point in enumerate(outputs):
         if point_within_ROI(point[1], ROI_polygon):
             points_inside_ROI.append(list(point[1][:4]))
-    return points_inside_ROI
+            ids_inside_ROI.append(point[1][-1])
+    return points_inside_ROI, ids_inside_ROI
 
 def compute_frame_rf(risk_dict):
     return sum(risk_dict.values()) + len(risk_dict.values())
@@ -222,6 +224,16 @@ def detect(opt, save_img=False):
     if half:
         model.half()  # to FP16
 
+        # initialize deepsort
+        cfg = get_config()
+        cfg.merge_from_file(opt.config_deepsort)
+        deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
+                            max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
+                            nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP,
+                            max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
+                            max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
+                            use_cuda=True)
+
     # Set Dataloader
     vid_path, vid_writer = None, None
     if webcam:
@@ -235,6 +247,9 @@ def detect(opt, save_img=False):
 
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
+
+    #initialize moving average window
+    movingAverageUpdater = movingAverage.movingAverage(10)
 
     # Run inference
     t0 = time.time()
@@ -319,6 +334,7 @@ def detect(opt, save_img=False):
 
                 bbox_xywh = []
                 bbox_xyxy = []
+                confs = []
 
                 ROI_polygon = Polygon(ROI_pts)
 
@@ -327,34 +343,52 @@ def detect(opt, save_img=False):
                     img_h, img_w, _ = im0.shape
                     x_c, y_c, bbox_w, bbox_h = bbox_rel(img_w, img_h, *xyxy)
                     obj = [x_c, y_c, bbox_w, bbox_h]
-
+                    confs.append([conf.item()])
                     bbox_xyxy.append(xyxy)
                     bbox_xywh.append(obj)
 
+                xywhs = torch.Tensor(bbox_xywh)
+                confss = torch.Tensor(confs)
+
+                # Pass detections to deepsort
+                outputs = deepsort.update(xywhs, confss, im0)
+
                 # draw boxes for visualization
-                if len(bbox_xywh) > 0:
+                if len(outputs) > 0:
                     # filter deepsort output
-                    outputs_in_ROI = remove_points_outside_ROI(bbox_xyxy, ROI_polygon)
-                    tlbr_in_ROI = outputs_in_ROI
+                    outputs_in_ROI, ids_in_ROI = remove_points_outside_ROI(outputs, ROI_polygon)
                     center_coords_in_ROI = xywh_to_center_coords(outputs_in_ROI)
-                    print("Center Coords: ", center_coords_in_ROI)
 
                     warped_pts = birdeye_transformer.transform_center_coords_to_birdeye(center_coords_in_ROI, M)
 
                     clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
                     draw_boxes(im0, outputs_in_ROI, clusters.labels_)
 
+                    id_to_label = {id : label for id, label in zip(ids_in_ROI, clusters.labels_)}
+                    movingAverageUpdater.updatePoints(warped_pts, ids_in_ROI)
+
+
+
+                    movingAveragePairs = movingAverageUpdater.getCurrentAverage()
+                    movingAverageIds = [id for id, x_coord, y_coord in movingAveragePairs]
+                    movingAverageLabels = [id_to_label[id] for id in movingAverageIds]
+                    movingAveragePts = [(x_coord, y_coord) for id, x_coord, y_coord in movingAveragePairs]
+                    movingAvgClustersLables = []
                     # embded the bird image to the video
-                    risk_dict = Counter(clusters.labels_)
-                    bird_image = bevw.create_birdeye_frame(warped_pts, clusters.labels_, risk_dict)
-                    bird_image = resize(bird_image, 30)
-                    bv_height, bv_width, _ = bird_image.shape
-                    frame_x_center, frame_y_center = frame_w //2, frame_h//2
-                    x_offset = 20
+                    risk_dict = {}
+                    if(len(movingAveragePairs) > 0):
+                        movingAvgClusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(movingAveragePts)
+                        movingAvgClustersLables = movingAvgClusters.labels_
+                        risk_dict = Counter(movingAvgClustersLables)
+                        bird_image = bevw.create_birdeye_frame(movingAveragePts, movingAvgClustersLables, risk_dict)
+                        bird_image = resize(bird_image, 30)
+                        bv_height, bv_width, _ = bird_image.shape
+                        frame_x_center, frame_y_center = frame_w //2, frame_h//2
+                        x_offset = 20
 
 
-                    im0[ frame_y_center-bv_height//2:frame_y_center+bv_height//2, \
-                        x_offset:bv_width+x_offset ] = bird_image
+                        im0[ frame_y_center-bv_height//2:frame_y_center+bv_height//2, \
+                            x_offset:bv_width+x_offset ] = bird_image
 
 
                     #write the risk graph
