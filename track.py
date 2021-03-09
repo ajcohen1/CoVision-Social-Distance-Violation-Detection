@@ -55,7 +55,7 @@ def get_coords_avg(avg_list):
 def resize(img, scale_percent):
     width = int(img.shape[1] * scale_percent / 100)
     height = int(img.shape[0] * scale_percent / 100)
-    dim = (width, height)
+    dim = (int(width), int(height))
     resized = cv2.resize(img, dim, interpolation=cv2.INTER_AREA)
     return resized
 
@@ -249,7 +249,7 @@ def detect(opt, save_img=False):
     names = model.module.names if hasattr(model, 'module') else model.names
 
     #initialize moving average window
-    movingAverageUpdater = movingAverage.movingAverage(10)
+    movingAverageUpdater = movingAverage.movingAverage(5)
 
     # Run inference
     t0 = time.time()
@@ -266,14 +266,7 @@ def detect(opt, save_img=False):
     frame_nums = []
 
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
-
-        # Get the ROI if this is the first frame
-        if frame_idx == 0:
+        if(frame_idx == 0):
             while True:
                 image = im0s
                 cv2.imshow("image", image)
@@ -281,32 +274,43 @@ def detect(opt, save_img=False):
                 if len(mouse_pts) == 7:
                     cv2.destroyWindow("image")
                     break
-                first_frame_display = False
-        four_points = mouse_pts
+            four_points = mouse_pts
+            # Get perspective, M is the transformation matrix for bird's eye view
+            M, Minv = get_camera_perspective(image, four_points[0:4])
 
-        # Get perspective, M is the transformation matrix for bird's eye view
-        M, Minv = get_camera_perspective(image, four_points[0:4])
+            # Last two points in getMousePoints... this will be the threshold distance between points
+            threshold_pts = src = np.float32(np.array([four_points[4:]]))
 
-        # Last two points in getMousePoints... this will be the threshold distance between points
-        threshold_pts = src = np.float32(np.array([four_points[4:]]))
+            # Convert distance to bird's eye view
+            warped_threshold_pts = cv2.perspectiveTransform(threshold_pts, M)[0]
 
-        # Convert distance to bird's eye view
-        warped_threshold_pts = cv2.perspectiveTransform(threshold_pts, M)[0]
+            # Get distance in pixels
+            threshold_pixel_dist = np.sqrt(
+                (warped_threshold_pts[0][0] - warped_threshold_pts[1][0]) ** 2
+                + (warped_threshold_pts[0][1] - warped_threshold_pts[1][1]) ** 2
+            )
 
-        # Get distance in pixels
-        threshold_pixel_dist = np.sqrt(
-            (warped_threshold_pts[0][0] - warped_threshold_pts[1][0]) ** 2
-            + (warped_threshold_pts[0][1] - warped_threshold_pts[1][1]) ** 2
-        )
+            # Draw the ROI on the output images
+            ROI_pts = np.array(
+                [four_points[0], four_points[1], four_points[3], four_points[2]], np.int32
+            )
 
-        # Draw the ROI on the output images
-        ROI_pts = np.array(
-            [four_points[0], four_points[1], four_points[3], four_points[2]], np.int32
-        )
+            # initialize birdeye view video writer
+            frame_h, frame_w, _ = image.shape
 
-        # initialize birdeye view video writer
-        frame_h, frame_w, _ = image.shape
-        bevw = birdeye_video_writer.birdeye_video_writer(frame_h, frame_w, M, threshold_pixel_dist, ROI_pts)
+            bevw = birdeye_video_writer.birdeye_video_writer(int(1.5 * frame_h), int(frame_w * 2), M,
+                                                            threshold_pixel_dist)
+        else:
+            break
+    t = time.time()
+    for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
+        print("Loop time: ", time.time() - t)
+        t = time.time()
+        img = torch.from_numpy(img).to(device)
+        img = img.half() if half else img.float()  # uint8 to fp16/32
+        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        if img.ndimension() == 3:
+            img = img.unsqueeze(0)
 
         cv2.polylines(im0s, [ROI_pts], True, (0, 255, 255), thickness=4)
 
@@ -318,6 +322,7 @@ def detect(opt, save_img=False):
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
 
+        print("Pre detection time: ", time.time() - t)
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
@@ -351,7 +356,9 @@ def detect(opt, save_img=False):
                 confss = torch.Tensor(confs)
 
                 # Pass detections to deepsort
+                deepsortTime = time.time()
                 outputs = deepsort.update(xywhs, confss, im0)
+                print("Deepsort function call: ", (time.time() - deepsortTime))
 
                 # draw boxes for visualization
                 if len(outputs) > 0:
@@ -364,38 +371,50 @@ def detect(opt, save_img=False):
                     clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
                     draw_boxes(im0, outputs_in_ROI, clusters.labels_)
 
-                    id_to_label = {id : label for id, label in zip(ids_in_ROI, clusters.labels_)}
                     movingAverageUpdater.updatePoints(warped_pts, ids_in_ROI)
 
-
-
+                    gettingAvgTime = time.time()
                     movingAveragePairs = movingAverageUpdater.getCurrentAverage()
+
                     movingAverageIds = [id for id, x_coord, y_coord in movingAveragePairs]
-                    movingAverageLabels = [id_to_label[id] for id in movingAverageIds]
                     movingAveragePts = [(x_coord, y_coord) for id, x_coord, y_coord in movingAveragePairs]
-                    movingAvgClustersLables = []
                     # embded the bird image to the video
                     risk_dict = {}
+
+                    otherStuff = time.time()
                     if(len(movingAveragePairs) > 0):
                         movingAvgClusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(movingAveragePts)
                         movingAvgClustersLables = movingAvgClusters.labels_
                         risk_dict = Counter(movingAvgClustersLables)
                         bird_image = bevw.create_birdeye_frame(movingAveragePts, movingAvgClustersLables, risk_dict)
-                        bird_image = resize(bird_image, 30)
+                        bird_image = resize(bird_image, 20)
                         bv_height, bv_width, _ = bird_image.shape
                         frame_x_center, frame_y_center = frame_w //2, frame_h//2
                         x_offset = 20
 
-
                         im0[ frame_y_center-bv_height//2:frame_y_center+bv_height//2, \
                             x_offset:bv_width+x_offset ] = bird_image
+                    else:
+                        risk_dict = Counter(clusters.labels_)
+                        bird_image = bevw.create_birdeye_frame(warped_pts, clusters.labels_, risk_dict)
+                        bird_image = resize(bird_image, 20)
+                        bv_height, bv_width, _ = bird_image.shape
+                        frame_x_center, frame_y_center = frame_w // 2, frame_h // 2
+                        x_offset = 20
 
+                        im0[frame_y_center - bv_height // 2:frame_y_center + bv_height // 2, \
+                        x_offset:bv_width + x_offset] = bird_image
+
+                    print("Other stuff: ", time.time() - otherStuff)
 
                     #write the risk graph
 
                     risk_factors += [compute_frame_rf(risk_dict)]
                     frame_nums += [frame_idx]
-                    d.on_running(frame_nums, risk_factors)
+                    graphTime = time.time()
+                    if(frame_idx % 10 == 0):
+                        d.on_running(frame_nums, risk_factors)
+                    print("Graph Time: ", time.time() - graphTime)
 
                 # Write MOT compliant results to file
                 if save_txt and len(outputs_in_ROI) != 0:
@@ -409,8 +428,6 @@ def detect(opt, save_img=False):
                             f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_left,
                                                            bbox_top, bbox_w, bbox_h, -1, -1, -1, -1))  # label format
 
-            # Print time (inference + NMS)
-            print('%sDone. (%.3fs)' % (s, t2 - t1))
 
             # Stream results
             if view_img:
@@ -421,12 +438,12 @@ def detect(opt, save_img=False):
 
             # Save results (image with detections)
             if save_img:
-                print('saving img!')
+
                 if dataset.mode == 'images':
                     cv2.imwrite(save_path, bird_image)
                     cv2.imwrite(save_path, im0)
                 else:
-                    print('saving video!')
+
                     if vid_path != save_path:  # new video
                         vid_path = save_path
                         if isinstance(vid_writer, cv2.VideoWriter):

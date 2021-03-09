@@ -7,11 +7,6 @@ class movingAverage:
 
     def updatePoints(self, setOfPoints, pointIds):
         frameDic = {idz : point.tolist() for point, idz in zip(setOfPoints, pointIds)}
-        print("Points into update points: ", setOfPoints)
-        print("Resulting Dictionary", frameDic)
-
-        #remove all the current points in class dic that arent in frame
-        print("Normal List", self.id_points_dic.items())
 
         if(len(frameDic) > 0):
             deletedIds = [id for id in self.id_points_dic if id not in frameDic]
