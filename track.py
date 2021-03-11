@@ -413,7 +413,7 @@ def detect(opt, save_img=False):
                     frame_nums += [frame_idx]
                     graphTime = time.time()
                     if(frame_idx % 10 == 0):
-                        d.on_running(frame_nums, risk_factors)
+                        d.on_running(frame_nums[-100:], risk_factors[-100:])
                     print("Graph Time: ", time.time() - graphTime)
 
                 # Write MOT compliant results to file
