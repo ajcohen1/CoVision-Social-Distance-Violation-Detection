@@ -264,6 +264,7 @@ def detect(opt, save_img=False):
 
     risk_factors = []
     frame_nums = []
+    count = 0
 
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
         if(frame_idx == 0):
@@ -411,9 +412,13 @@ def detect(opt, save_img=False):
 
                     risk_factors += [compute_frame_rf(risk_dict)]
                     frame_nums += [frame_idx]
+                    d.on_running(frame_nums, risk_factors, count, count + 100)
                     graphTime = time.time()
-                    if(frame_idx % 10 == 0):
-                        d.on_running(frame_nums[-100:], risk_factors[-100:])
+
+                    if(frame_idx > 100):
+                        count += 1
+                        frame_nums.pop(0)
+                        risk_factors.pop(0)
                     print("Graph Time: ", time.time() - graphTime)
 
                 # Write MOT compliant results to file
