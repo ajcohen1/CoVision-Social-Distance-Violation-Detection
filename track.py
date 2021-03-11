@@ -4,8 +4,8 @@ from yolov5.utils.datasets import LoadImages, LoadStreams
 from yolov5.utils.general import (
     check_img_size, non_max_suppression, apply_classifier, scale_coords, xyxy2xywh, plot_one_box, strip_optimizer)
 from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
-from deep_sort.utils.parser import get_config
-from deep_sort.deep_sort import DeepSort
+from deep_sort_pytorch.utils.parser import get_config
+from deep_sort_pytorch.deep_sort_pytorch import DeepSort
 from sklearn.cluster import DBSCAN, AgglomerativeClustering
 from shapely.geometry import Point
 from shapely.geometry.polygon import Polygon
@@ -479,7 +479,7 @@ if __name__ == '__main__':
     parser.add_argument('--classes', nargs='+', type=int, default=[0], help='filter by class')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
-    parser.add_argument("--config_deepsort", type=str, default="deep_sort/configs/deep_sort.yaml")
+    parser.add_argument("--config_deepsort", type=str, default="deep_sort_pytorch/configs/deep_sort_pytorch.yaml")
     args = parser.parse_args()
     args.img_size = check_img_size(args.img_size)
     print(args)
