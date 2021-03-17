@@ -192,10 +192,10 @@ def draw_boxes(img, bbox, cluster_labels=None, offset=(0, 0)):
 def remove_points_outside_ROI(outputs, ROI_polygon):
     points_inside_ROI = []
     ids_inside_ROI = []
-    for point in enumerate(outputs):
-        if point_within_ROI(point[1], ROI_polygon):
-            points_inside_ROI.append(list(point[1][:4]))
-            ids_inside_ROI.append(point[1][-1])
+    for index, point in enumerate(outputs):
+        if point_within_ROI(point, ROI_polygon):
+            points_inside_ROI.append(list(point))
+           # ids_inside_ROI.append(point[1])
     return points_inside_ROI, ids_inside_ROI
 
 def compute_frame_rf(risk_dict):
@@ -299,7 +299,7 @@ def detect(opt, save_img=False):
             # initialize birdeye view video writer
             frame_h, frame_w, _ = image.shape
 
-            bevw = birdeye_video_writer.birdeye_video_writer(int(1.5 * frame_h), int(frame_w * 2), M,
+            bevw = birdeye_video_writer.birdeye_video_writer(frame_h, frame_w, M,
                                                             threshold_pixel_dist)
         else:
             break
@@ -315,14 +315,15 @@ def detect(opt, save_img=False):
 
         cv2.polylines(im0s, [ROI_pts], True, (0, 255, 255), thickness=4)
 
-        # Inference
+        # Inferenc
+        tOther = time.time()
         t1 = time_synchronized()
         pred = model(img, augment=opt.augment)[0]
 
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
-
+        print("Non max suppression and inference: ", time.time() - tOther)
         print("Pre detection time: ", time.time() - t)
         # Process detections
         for i, det in enumerate(pred):  # detections per image
@@ -358,67 +359,72 @@ def detect(opt, save_img=False):
 
                 # Pass detections to deepsort
                 deepsortTime = time.time()
-                outputs = deepsort.update(xywhs, confss, im0)
+                #outputs = deepsort.update(xywhs, confss, im0)
                 print("Deepsort function call: ", (time.time() - deepsortTime))
-
+                outputs = bbox_xyxy
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     # filter deepsort output
-                    outputs_in_ROI, ids_in_ROI = remove_points_outside_ROI(outputs, ROI_polygon)
+                    outputs_in_ROI, ids_in_ROI = remove_points_outside_ROI(bbox_xyxy, ROI_polygon)
                     center_coords_in_ROI = xywh_to_center_coords(outputs_in_ROI)
 
                     warped_pts = birdeye_transformer.transform_center_coords_to_birdeye(center_coords_in_ROI, M)
 
                     clusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(warped_pts)
+                    print(clusters.labels_)
                     draw_boxes(im0, outputs_in_ROI, clusters.labels_)
 
-                    movingAverageUpdater.updatePoints(warped_pts, ids_in_ROI)
+                    risk_dict = Counter(clusters.labels_)
+                    bird_image = bevw.create_birdeye_frame(warped_pts, clusters.labels_, risk_dict)
 
-                    gettingAvgTime = time.time()
-                    movingAveragePairs = movingAverageUpdater.getCurrentAverage()
-
-                    movingAverageIds = [id for id, x_coord, y_coord in movingAveragePairs]
-                    movingAveragePts = [(x_coord, y_coord) for id, x_coord, y_coord in movingAveragePairs]
+                    # movingAverageUpdater.updatePoints(warped_pts, ids_in_ROI)
+                    #
+                    # gettingAvgTime = time.time()
+                    # movingAveragePairs = movingAverageUpdater.getCurrentAverage()
+                    #
+                    # movingAverageIds = [id for id, x_coord, y_coord in movingAveragePairs]
+                    # movingAveragePts = [(x_coord, y_coord) for id, x_coord, y_coord in movingAveragePairs]
                     # embded the bird image to the video
-                    risk_dict = {}
 
-                    otherStuff = time.time()
-                    if(len(movingAveragePairs) > 0):
-                        movingAvgClusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(movingAveragePts)
-                        movingAvgClustersLables = movingAvgClusters.labels_
-                        risk_dict = Counter(movingAvgClustersLables)
-                        bird_image = bevw.create_birdeye_frame(movingAveragePts, movingAvgClustersLables, risk_dict)
-                        bird_image = resize(bird_image, 20)
-                        bv_height, bv_width, _ = bird_image.shape
-                        frame_x_center, frame_y_center = frame_w //2, frame_h//2
-                        x_offset = 20
 
-                        im0[ frame_y_center-bv_height//2:frame_y_center+bv_height//2, \
-                            x_offset:bv_width+x_offset ] = bird_image
-                    else:
-                        risk_dict = Counter(clusters.labels_)
-                        bird_image = bevw.create_birdeye_frame(warped_pts, clusters.labels_, risk_dict)
-                        bird_image = resize(bird_image, 20)
-                        bv_height, bv_width, _ = bird_image.shape
-                        frame_x_center, frame_y_center = frame_w // 2, frame_h // 2
-                        x_offset = 20
+                    # otherStuff = time.time()
+                    # if(len(movingAveragePairs) > 0):
+                    #     movingAvgClusters = DBSCAN(eps=threshold_pixel_dist, min_samples=1).fit(movingAveragePts)
+                    #     movingAvgClustersLables = movingAvgClusters.labels_
+                    #     risk_dict = Counter(movingAvgClustersLables)
+                    #     bird_image = bevw.create_birdeye_frame(movingAveragePts, movingAvgClustersLables, risk_dict)
+                    #     bird_image = resize(bird_image, 20)
+                    #     bv_height, bv_width, _ = bird_image.shape
+                    #     frame_x_center, frame_y_center = frame_w //2, frame_h//2
+                    #     x_offset = 20
+                    #
+                    #     im0[ frame_y_center-bv_height//2:frame_y_center+bv_height//2, \
+                    #         x_offset:bv_width+x_offset ] = bird_image
+                    # else:
+                    #     risk_dict = Counter(clusters.labels_)
+                    #     bird_image = bevw.create_birdeye_frame(warped_pts, clusters.labels_, risk_dict)
+                    bird_image = resize(bird_image, 20)
+                    bv_height, bv_width, _ = bird_image.shape
+                    frame_x_center, frame_y_center = frame_w // 2, frame_h // 2
+                    x_offset = 20
 
-                        im0[frame_y_center - bv_height // 2:frame_y_center + bv_height // 2, \
-                        x_offset:bv_width + x_offset] = bird_image
+                    im0[frame_y_center - bv_height // 2:frame_y_center + bv_height // 2, \
+                    x_offset:bv_width + x_offset] = bird_image
 
-                    print("Other stuff: ", time.time() - otherStuff)
+                    # print("Other stuff: ", time.time() - otherStuff)
 
                     #write the risk graph
 
                     risk_factors += [compute_frame_rf(risk_dict)]
                     frame_nums += [frame_idx]
-                    d.on_running(frame_nums, risk_factors, count, count + 100)
                     graphTime = time.time()
 
                     if(frame_idx > 100):
                         count += 1
                         frame_nums.pop(0)
                         risk_factors.pop(0)
+                    if frame_idx % 10 == 0:
+                        d.on_running(frame_nums, risk_factors, count, count + 100)
                     print("Graph Time: ", time.time() - graphTime)
 
                 # Write MOT compliant results to file

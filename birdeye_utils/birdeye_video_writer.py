@@ -12,8 +12,6 @@ class birdeye_video_writer:
         self.background = cv2.imread('testpic.jpg', cv2.IMREAD_COLOR)
         self.transformation_matrix = transformation_matrix
         self.threshold_pixel_dist = threshold_pixel_dist
-        self.frame_h = frame_h
-        self.frame_w = frame_w
         self.birdeye_background = cv2.warpPerspective(self.background, transformation_matrix, (frame_w, frame_h))
 
     def create_birdeye_frame(self, warped_center_coords, labels, risk_dict):
